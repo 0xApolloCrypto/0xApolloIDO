@@ -8,7 +8,7 @@ import "@uniswap/v2-periphery/contracts/interfaces/IUniswapV2Router02.sol";
 import "@openzeppelin/contracts-upgradeable/utils/cryptography/ECDSAUpgradeable.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
-import {Apollo} from "./Apollo.sol";
+import {IApollo} from "./IApollo.sol";
 import {InitialLPLocker} from "./InitialLPLocker.sol";
 
 contract ApolloTokenPreSale is Ownable {
@@ -20,6 +20,8 @@ contract ApolloTokenPreSale is Ownable {
     uint256 public softCap = 100000 * (10**5);
     uint256 public hardCap = 200000 * (10**5);
     uint256 public preSaleEndTime;
+    uint256 public preSaleStartTime;
+    uint256 public deployedTime;
     uint256 public totalSoldAmount;
     uint256 public totalRaisedAmount;
     uint256 public constant allowListSalePrice = 10;
@@ -31,7 +33,7 @@ contract ApolloTokenPreSale is Ownable {
     bool public finalized;
     bool public failed;
     bool public takenRestApollo;
-    Apollo public apolloToken;
+    IApollo public apolloToken;
     IERC20 public usdcToken;
     InitialLPLocker public initialLPLocker;
 
@@ -50,11 +52,14 @@ contract ApolloTokenPreSale is Ownable {
         address _signer,
         IUniswapV2Router02 _router,
         IERC20 _usdc,
+        uint256 _startTime,
         uint256 _endTime
     ) {
+        deployedTime = block.timestamp;
         signer = _signer;
         router = _router;
         preSaleEndTime = _endTime;
+        preSaleStartTime = _startTime;
         usdcToken = _usdc;
         initialLpUsdc = 75000 * (10**6);
         initialLpApollo = 50000 * (10**5);
@@ -63,6 +68,7 @@ contract ApolloTokenPreSale is Ownable {
     }
 
     modifier onSale() {
+        require(block.timestamp > preSaleStartTime, "presale not start yet");
         require(!failed, "already failed");
         require(!finalized, "already finished");
         _;
@@ -73,13 +79,13 @@ contract ApolloTokenPreSale is Ownable {
         _;
     }
 
-    function info()
+    function info(address sender)
         public
         view
         returns (
-            uint256 _softCap,
             uint256 _hardCap,
             uint256 _preSaleEndTime,
+            uint256 _preSaleStartTime,
             uint256 _totalSoldAmount,
             uint256 _totalRaisedAmount,
             uint256 _myUsdcBalance,
@@ -89,19 +95,16 @@ contract ApolloTokenPreSale is Ownable {
             uint256 _myLimitSaleRecord,
             uint256 _myPublicSaleRecord,
             bool _isClaimed,
-            bool _finalized,
-            bool _failed
+            bool _finalized
         )
     {
-        _softCap = softCap;
         _hardCap = hardCap;
         _preSaleEndTime = preSaleEndTime;
+        _preSaleStartTime = preSaleStartTime;
         _totalSoldAmount = totalSoldAmount;
         _totalRaisedAmount = totalRaisedAmount;
         _finalized = finalized;
-        _failed = failed;
 
-        address sender = msg.sender;
         if (address(usdcToken) != address(0)) {
             _myUsdcBalance = usdcToken.balanceOf(sender);
             _salerUsdcBalance = usdcToken.balanceOf(address(this));
@@ -243,15 +246,30 @@ contract ApolloTokenPreSale is Ownable {
         preSaleEndTime = time;
     }
 
-    function setApollo(Apollo apollo) public onlyOwner {
+    function setApollo(IApollo apollo) public onlyOwner {
         apolloToken = apollo;
+    }
+
+    function setPreSaleStartTime(uint256 startAt) public onlyOwner {
+        preSaleStartTime = startAt;
     }
 
     function takeRestApolloAndUsdc(address receiver) public onlyOwner {
         require(finalized, "need finished");
         require(!takenRestApollo, "had taken");
         takenRestApollo = true;
-        apolloToken.transfer(receiver, hardCap - totalRaisedAmount);
+        if (totalSoldAmount < hardCap) {
+            apolloToken.transfer(receiver, hardCap - totalSoldAmount);
+        }
         usdcToken.transfer(receiver, usdcToken.balanceOf(address(this)));
+    }
+
+    function recover(
+        IERC20 token,
+        address receiver,
+        uint256 amount
+    ) public onlyOwner {
+        require(block.timestamp > deployedTime + 10 days, "time lock for user claim");
+        token.safeTransfer(receiver, amount);
     }
 }
